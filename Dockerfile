@@ -1,7 +1,7 @@
-FROM node:20-alpine as build-stage
+FROM node:26-alpine as build-stage
 
 WORKDIR /app
-RUN corepack enable
+RUN npm install --global pnpm@10.34.9
 
 COPY .npmrc package.json pnpm-lock.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/root/.pnpm-store \
