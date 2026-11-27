@@ -1,33 +1,19 @@
 <script setup lang="ts">
-// https://github.com/vueuse/head
-// you can use this to manipulate the document head in any components,
-// they will be rendered correctly in the html results with vite-ssg
-const { t } = useI18n()
+import { en, ko } from '@nuxt/ui/locale'
+
+const { t, locale } = useI18n()
 
 useHead(() => ({
-  title: t('site.title'),
-  meta: [
-    {
-      name: 'description',
-      content: t('site.description'),
-    },
-    {
-      name: 'theme-color',
-      content: isDark.value ? '#00aba9' : '#ffffff',
-    },
-  ],
-  link: [
-    {
-      rel: 'icon',
-      type: 'image/svg+xml',
-      href: () => preferredDark.value ? '/favicon-dark.svg' : '/favicon.svg',
-    },
-  ],
+  htmlAttrs: { lang: locale.value },
+  titleTemplate: title => title ? `${title} | ${t('common.appName')}` : t('common.appName'),
+  meta: [{ name: 'description', content: t('common.workspace') }],
 }))
 </script>
 
 <template>
-  <div class="relative min-h-screen overflow-x-hidden bg-background text-foreground font-sans">
-    <RouterView />
-  </div>
+  <UApp :locale="locale === 'en' ? en : ko" :toaster="null">
+    <div class="relative min-h-screen bg-default text-default font-sans">
+      <RouterView />
+    </div>
+  </UApp>
 </template>

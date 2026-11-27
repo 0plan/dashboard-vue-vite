@@ -1,52 +1,44 @@
-import type { Locale } from 'vue-i18n'
-import type { UserModule } from '~/types'
+import type { ViteSSGContext } from 'vite-ssg'
+import { useLocalStorage } from '@vueuse/core'
+import { watch } from 'vue'
 import { createI18n } from 'vue-i18n'
 
-const LOCALE_FILE_RE = /([\w-]*)\.yml$/
+const resources = import.meta.glob('../../locales/*/*.yml', { import: 'default' })
+export const preferredLanguage = useLocalStorage('vueforge:locale', 'ko', { writeDefaults: false })
 
-// Import i18n resources
-// https://vitejs.dev/guide/features.html#glob-import
-//
-// Don't need this? Try VueForge: https://github.com/0plan/vue3-starter-template
-const i18n = createI18n({
-  legacy: false,
-  locale: '',
-  messages: {},
-})
-
-const localesMap = Object.fromEntries(
-  Object.entries(import.meta.glob('../../locales/*.yml'))
-    .map(([path, loadLocale]) => [path.match(LOCALE_FILE_RE)?.[1], loadLocale]),
-) as Record<Locale, () => Promise<{ default: Record<string, string> }>>
-
-export const availableLocales = Object.keys(localesMap)
-
-const loadedLanguages: string[] = []
-
-function setI18nLanguage(lang: Locale) {
-  i18n.global.locale.value = lang as any
-  if (typeof document !== 'undefined')
-    document.querySelector('html')?.setAttribute('lang', lang)
-  return lang
-}
-
-export async function loadLanguageAsync(lang: string): Promise<Locale> {
-  // If the same language
-  if (i18n.global.locale.value === lang)
-    return setI18nLanguage(lang)
-
-  // If the language was already loaded
-  if (loadedLanguages.includes(lang))
-    return setI18nLanguage(lang)
-
-  // If the language hasn't been loaded yet
-  const messages = await localesMap[lang]()
-  i18n.global.setLocaleMessage(lang, messages.default)
-  loadedLanguages.push(lang)
-  return setI18nLanguage(lang)
-}
-
-export const install: UserModule = ({ app }) => {
+export function install({ app, router, isClient }: Pick<ViteSSGContext, 'app' | 'router' | 'isClient'>) {
+  const i18n = createI18n({ legacy: false, locale: 'ko', fallbackLocale: false, messages: {} })
   app.use(i18n)
-  loadLanguageAsync('ko')
+
+  // Auth redirects run in beforeEach; only load messages for the page that opens.
+  router.beforeResolve(async (to) => {
+    const language = isClient && preferredLanguage.value === 'en' ? 'en' : 'ko'
+    await Promise.all(['common', String(to.name)].map(async (namespace) => {
+      if (Object.hasOwn(i18n.global.getLocaleMessage(language), namespace))
+        return
+      const messages = await resources[`../../locales/${language}/${namespace}.yml`]()
+      i18n.global.mergeLocaleMessage(language, { [namespace]: messages })
+    }))
+    to.meta.language = language
+  })
+  router.afterEach((to, _from, failure) => {
+    if (!failure)
+      i18n.global.locale.value = to.meta.language === 'en' ? 'en' : 'ko'
+  })
+
+  if (isClient) {
+    const stop = watch(preferredLanguage, async (language) => {
+      // Reuse the same guard without remounting the page or adding a history entry.
+      const { path, query, hash } = router.currentRoute.value
+      try {
+        await router.replace({ path, query, hash, force: true })
+      }
+      catch {
+        // A missing/offline chunk must not leave refresh pointing at an unusable language.
+        if (preferredLanguage.value === language)
+          preferredLanguage.value = i18n.global.locale.value
+      }
+    })
+    app.onUnmount(stop)
+  }
 }

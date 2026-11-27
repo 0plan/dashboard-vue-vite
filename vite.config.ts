@@ -1,14 +1,9 @@
 /// <reference types="vitest" />
 import path from 'node:path'
 import VueI18n from '@intlify/unplugin-vue-i18n/vite'
-import Shiki from '@shikijs/markdown-it'
-import tailwindcss from '@tailwindcss/vite'
+import ui from '@nuxt/ui/vite'
 import Vue from '@vitejs/plugin-vue'
-import LinkAttributes from 'markdown-it-link-attributes'
-import AutoImport from 'unplugin-auto-import/vite'
-import Components from 'unplugin-vue-components/vite'
 import VueMacros from 'unplugin-vue-macros/vite'
-import Markdown from 'unplugin-vue-markdown/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import VueDevTools from 'vite-plugin-vue-devtools'
 import Layouts from 'vite-plugin-vue-layouts'
@@ -17,8 +12,7 @@ import generateSitemap from 'vite-ssg-sitemap'
 import { defineConfig } from 'vitest/config'
 import { VueRouterAutoImports } from 'vue-router/unplugin'
 import VueRouter from 'vue-router/vite'
-
-const EXTERNAL_LINK_RE = /^https?:\/\//
+import { managementPages } from './src/console/menu'
 
 export default defineConfig({
   resolve: {
@@ -32,74 +26,45 @@ export default defineConfig({
   },
 
   plugins: [
-    tailwindcss(),
     VueMacros({
       betterDefine: false,
       plugins: {
-        vue: Vue({
-          include: [/\.vue$/, /\.md$/],
-        }),
+        vue: Vue(),
       },
     }),
 
     VueRouter({
-      extensions: ['.vue', '.md'],
       dts: 'src/route-map.d.ts',
+      beforeWriteFiles(root) {
+        for (const page of managementPages)
+          root.insert(page.path.slice(1), path.resolve(import.meta.dirname, 'src/console/Management.vue')).name = page.key
+      },
     }),
 
     // https://github.com/JohnCampionJr/vite-plugin-vue-layouts
-    Layouts(),
+    Layouts({ defaultLayout: 'traffic' }),
 
-    // https://github.com/antfu/unplugin-auto-import
-    AutoImport({
-      imports: [
-        'vue',
-        'vue-i18n',
-        '@vueuse/core',
-        VueRouterAutoImports,
-        {
-          '@unhead/vue': ['useHead', 'useSeoMeta'],
-          // add any other imports you were relying on
-          'vue-router/auto': ['useLink'],
-        },
-      ],
-      dts: 'src/auto-imports.d.ts',
-      dirs: [
-        'src/composables',
-        'src/stores',
-      ],
-      vueTemplate: true,
-    }),
-
-    // https://github.com/antfu/unplugin-vue-components
-    Components({
-      // allow auto load markdown components under `./src/components/`
-      extensions: ['vue', 'md'],
-      // allow auto import and register components used in markdown
-      include: [/\.vue$/, /\.vue\?vue/, /\.md$/],
-      dts: 'src/components.d.ts',
-    }),
-
-    // https://github.com/unplugin/unplugin-vue-markdown
-    // Don't need this? Try VueForge: https://github.com/0plan/vue3-starter-template
-    Markdown({
-      wrapperClasses: 'prose prose-sm prose-zinc dark:prose-invert dark:prose-zinc m-auto text-left',
-      headEnabled: true,
-      async markdownItSetup(md) {
-        md.use(LinkAttributes, {
-          matcher: (link: string) => EXTERNAL_LINK_RE.test(link),
-          attrs: {
-            target: '_blank',
-            rel: 'noopener',
-          },
-        })
-        md.use(await Shiki({
-          defaultColor: false,
-          themes: {
-            light: 'vitesse-light',
-            dark: 'vitesse-dark',
-          },
-        }))
+    ui({
+      colorMode: false, // Keep the starter's existing theme preference.
+      theme: { defaultVariants: { color: 'neutral' } },
+      ui: {
+        button: { slots: { base: 'min-h-11 min-w-11 justify-center' } },
+        input: { slots: { base: 'min-h-11' } },
+      },
+      autoImport: {
+        imports: [
+          'vue',
+          'vue-i18n',
+          '@vueuse/core',
+          VueRouterAutoImports,
+          { '@unhead/vue': ['useHead', 'useSeoMeta'], 'vue-router': ['useLink'] },
+        ],
+        dts: 'src/auto-imports.d.ts',
+        dirs: ['src/composables'],
+        vueTemplate: true,
+      },
+      components: {
+        dts: 'src/components.d.ts',
       },
     }),
 
@@ -107,9 +72,18 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'safari-pinned-tab.svg'],
+      workbox: {
+        navigateFallback: null,
+        globIgnores: ['assets/locales/**'],
+        runtimeCaching: [{
+          urlPattern: /\/assets\/locales\/.+\.js$/,
+          handler: 'CacheFirst',
+          options: { cacheName: 'vueforge-locales', expiration: { maxEntries: 24 } },
+        }],
+      },
       manifest: {
-        name: 'VueForge',
-        short_name: 'VueForge',
+        name: 'Web Traffic Dashboard',
+        short_name: 'Dashboard',
         theme_color: '#ffffff',
         icons: [
           {
@@ -147,6 +121,17 @@ export default defineConfig({
     VueDevTools(),
   ],
 
+  build: {
+    rollupOptions: {
+      output: {
+        // Let the service worker cache translations when visited, not all on install.
+        chunkFileNames: ({ facadeModuleId }) => facadeModuleId?.endsWith('.yml')
+          ? `assets/locales/${path.basename(path.dirname(facadeModuleId))}/[name]-[hash].js`
+          : 'assets/[name]-[hash].js',
+      },
+    },
+  },
+
   // https://github.com/vitest-dev/vitest
   test: {
     include: ['test/**/*.test.ts'],
@@ -157,13 +142,14 @@ export default defineConfig({
   ssgOptions: {
     script: 'async',
     formatting: 'minify',
+    includedRoutes: paths => [...paths.filter(p => !p.includes(':') && !p.includes('*')), '/404'],
     onFinished() {
-      generateSitemap()
+      generateSitemap({ exclude: ['/404'] })
     },
   },
 
   ssr: {
     // TODO: workaround until they support native ESM
-    noExternal: ['workbox-window', /vue-i18n/],
+    noExternal: ['workbox-window', /vue-i18n/, '@nuxt/ui'],
   },
 })
