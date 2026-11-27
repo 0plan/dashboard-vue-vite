@@ -1,24 +1,24 @@
 import type { UserModule } from './types'
+import ui from '@nuxt/ui/vue-plugin'
 import { setupLayouts } from 'virtual:generated-layouts'
 
 import { ViteSSG } from 'vite-ssg'
 import { routes } from 'vue-router/auto-routes'
 import App from './App.vue'
 
-import '@unocss/reset/tailwind.css'
 import './styles/index.css'
 
 // https://github.com/antfu/vite-ssg
 export const createApp = ViteSSG(
   App,
   {
-    routes: setupLayouts([...routes]),
+    routes: [{ path: '/', redirect: '/dashboard' }, ...setupLayouts([...routes])],
     base: import.meta.env.BASE_URL,
   },
-  (ctx) => {
+  async (ctx) => {
+    ctx.app.use(ui)
     // install all modules under `modules/`
-    Object.values(import.meta.glob<{ install: UserModule }>('./modules/*.ts', { eager: true }))
-      .forEach(i => i.install?.(ctx))
-    // ctx.app.use(Previewer)
+    const modules = import.meta.glob<{ install: UserModule }>('./modules/*.ts', { eager: true })
+    await Promise.all(Object.values(modules).map(module => module.install?.(ctx)))
   },
 )
